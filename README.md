@@ -6,7 +6,7 @@ See the [technical blog](https://gusty-radon-13b.notion.site/Proof-of-solvency-6
 
 ### Run third-party services
 This project needs following third party services:
-- postgresql: used to store `witness`, `userproof`, `proof` table;
+- mysql: used to store `witness`, `userproof`, `proof` table;
 - redis: provide distributed lock for multi provers;
 - kvrocks: used to store account tree
 
@@ -15,12 +15,12 @@ We can use docker to run these services:
 ```shell
 docker run -d --name zkpos-redis -p 6379:6379 redis
 
-docker run -d --name zkpos-postgres -p 5432:5432 -e PGDATA=/var/lib/postgresql/data/pgdata -v /server/docker_data/pgdata:/var/lib/postgresql/data -e POSTGRES_PASSWORD=zkpos@123 -e POSTGRES_USER=postgres -e POSTGRES_DB=zkpos postgres
+docker run -d --name zkpos-mysql -p 3306:3306  -v /server/docker_data/mysql_data:/var/lib/mysql -e MYSQL_USER=zkpos -e MYSQL_PASSWORD=zkpos@123 -e MYSQL_DATABASE=zkpos  -e MYSQL_ROOT_PASSWORD=zkpos@123 mysql
 
 docker run -d --name zkpos-kvrocks -p 6666:6666 -v /server/docker_data/kvrocksdata:/var/lib/kvrocks apache/kvrocks
 ```
 
-where `/server/docker_data/` is directory in the host machine which is used to persist postgres and kvrocks docker data.
+where `/server/docker_data/` is directory in the host machine which is used to persist mysql and kvrocks docker data.
 
 
 ### Generate zk keys
@@ -28,7 +28,7 @@ where `/server/docker_data/` is directory in the host machine which is used to p
 The `keygen` service is for generating zk related keys which are used to generate and verify zk proof. The `BatchCreateUserOpsCounts` constant variable in utils package represent how many users can be created in one batch.
 The larger the `BatchCreateUserOpsCounts` is, the longer it will take to generate zk-related keys and generate zk proof.
 
-We choose `512` as the `BatchCreateUserOpsCounts` variable. It will take about 3 hours to generate zk-related keys, and 55 seconds to generate zk proof for one batch in a 128GB memory and 32 core virtual machine.
+We choose `864` as the `BatchCreateUserOpsCounts` variable. It will take about 6 hours to generate zk-related keys, and 105 seconds to generate zk proof for one batch in a 128GB memory and 32 core virtual machine.
 
 Run the following commands to start `keygen` service:
 ```
@@ -40,15 +40,15 @@ cd src/keygen; go run main.go
 After `keygen` service finishes running, there will be several key files generated in the current directory, like the following:
 ```shell
 Total 26G
--rw-rw-r-- 1 ec2-user ec2-user  69M 12月 26 07:49 zkpor512.ccs.ct.save
--rw-rw-r-- 1 ec2-user ec2-user  16G 12月 26 07:51 zkpor512.ccs.save
--rw-rw-r-- 1 ec2-user ec2-user 1.8G 12月 26 07:51 zkpor512.pk.A.save
--rw-rw-r-- 1 ec2-user ec2-user 1.6G 12月 26 07:51 zkpor512.pk.B1.save
--rw-rw-r-- 1 ec2-user ec2-user 3.2G 12月 26 07:51 zkpor512.pk.B2.save
--rw-rw-r-- 1 ec2-user ec2-user  59M 12月 26 07:51 zkpor512.pk.E.save
--rw-rw-r-- 1 ec2-user ec2-user 1.9G 12月 26 07:52 zkpor512.pk.K.save
--rw-rw-r-- 1 ec2-user ec2-user  708 12月 26 07:52 zkpor512.vk.save
--rw-rw-r-- 1 ec2-user ec2-user 2.1G 12月 26 07:52 zkpor512.pk.Z.save
+-rw-rw-r-- 1 ec2-user ec2-user  69M 12月 26 07:49 zkpor864.ccs.ct.save
+-rw-rw-r-- 1 ec2-user ec2-user  16G 12月 26 07:51 zkpor864.ccs.save
+-rw-rw-r-- 1 ec2-user ec2-user 1.8G 12月 26 07:51 zkpor864.pk.A.save
+-rw-rw-r-- 1 ec2-user ec2-user 1.6G 12月 26 07:51 zkpor864.pk.B1.save
+-rw-rw-r-- 1 ec2-user ec2-user 3.2G 12月 26 07:51 zkpor864.pk.B2.save
+-rw-rw-r-- 1 ec2-user ec2-user  59M 12月 26 07:51 zkpor864.pk.E.save
+-rw-rw-r-- 1 ec2-user ec2-user 1.9G 12月 26 07:52 zkpor864.pk.K.save
+-rw-rw-r-- 1 ec2-user ec2-user  708 12月 26 07:52 zkpor864.vk.save
+-rw-rw-r-- 1 ec2-user ec2-user 2.1G 12月 26 07:52 zkpor864.pk.Z.save
 ```
 
 ### Generate witness
@@ -58,7 +58,7 @@ The `witness` service is used to generate witness for `prover` service.
 `witness/config/config.json` is the config file `witness` service use. The sample file is as follows:
 ```json
 {
-  "PostgresDataSource" : "host=127.0.0.1 user=postgres password=zkpos@123 dbname=zkpos port=5432 sslmode=disable",
+  "MysqlDataSource" : "zkpos:zkpos@123@tcp(127.0.0.1:3306)/zkpos?parseTime=true",
   "UserDataFile": "/server/data/20230118",
   "DbSuffix": "0",
   "TreeDB": {
@@ -72,7 +72,7 @@ The `witness` service is used to generate witness for `prover` service.
 
 Where
 
-- `PostgresDataSource`: this is the postgres sql config;
+- `MysqlDataSource`: this is the mysql config;
 - `UserDataFile`: the directory which contains all users balance sheet files;
 - `DbSuffix`: this suffix will be appended to the ending of table name, such as `proof0`, `witness0` table;
 - `TreeDB`:
@@ -97,19 +97,19 @@ The `prover` service is used to generate zk proof and supports running in parall
 `prover/config/config.json` is the config file `prover` service uses. The sample file is as follows:
 ```json
 {
-  "PostgresDataSource" : "host=127.0.0.1 user=postgres password=zkpos@123 dbname=zkpos port=5432 sslmode=disable",
+  "MysqlDataSource" : "zkpos:zkpos@123@tcp(127.0.0.1:3306)/zkpos?parseTime=true",
   "DbSuffix": "0",
   "Redis": {
     "Host": "127.0.0.1:6379",
     "Type": "node"
   },
-  "ZkKeyName": "/server/zkmerkle-proof-of-solvency/src/keygen/zkpor512"
+  "ZkKeyName": "/server/zkmerkle-proof-of-solvency/src/keygen/zkpor864"
 }
 ```
 
 Where
 
-- `PostgresDataSource`: this is the postgres sql config;
+- `MysqlDataSource`: this is the mysql config;
 - `DbSuffix`: this suffix will be appended to the ending of table name, such as `proof0`, `witness0` table;
 - `Redis`:
   - `Host`: `redis` service listen addr;
@@ -132,7 +132,7 @@ After the whole `prover` service finished, we can see batch zk proof in `proof` 
 The `userproof` service is used to generate and persist user merkle proof. It uses `userproof/config/config.json` as config file, and the sample config is as follows:
 ```json
 {
-  "PostgresDataSource" : "host=127.0.0.1 user=postgres password=zkpos@123 dbname=zkpos port=5432 sslmode=disable",
+  "MysqlDataSource" : "zkpos:zkpos@123@tcp(127.0.0.1:3306)/zkpos?parseTime=true",
   "UserDataFile": "/server/data/20230118",
   "DbSuffix": "0",
   "TreeDB": {
@@ -146,7 +146,7 @@ The `userproof` service is used to generate and persist user merkle proof. It us
 
 Where
 
-- `PostgresDataSource`: this is the postgres sql config;
+- `MysqlDataSource`: this is the mysql config;
 - `UserDataFile`: the directory which contains all users balance sheet files;
 - `DbSuffix`: this suffix will be appended to the ending of table name, such as `proof0`, `witness0` table;
 - `TreeDB`:
@@ -222,7 +222,7 @@ Run the following command to remove only kvrocks data:
 cd src/dbtool; go run main.go -only_delete_kvrocks
 ```
 
-Run the following command to delete kvrocks data and postgresql:
+Run the following command to delete kvrocks data and mysql:
 ```shell
 cd src/dbtool; go run main.go -delete_all
 ```
@@ -247,8 +247,8 @@ Compare the account tree root in the output log with the account tree root by `w
 
 **Note: when `userproof` service runs in the `-memory_tree` mode, its performance is about 75k per minute, so 3000w accounts will take about ~7 hours**
 
-#### check postgresql table consistency
+#### check mysql table consistency
 
-Suppose the number of users is `accountsNum`, and `batchNumber` is 512, so the number of rows in `witness` and `proof` table is: `(accountNum + 512 - 1) / 512`. And the number of rows in `userproof` table equals to `accountsNum`.
+Suppose the number of users is `accountsNum`, and `batchNumber` is 864, so the number of rows in `witness` and `proof` table is: `(accountNum + 864 - 1) / 864`. And the number of rows in `userproof` table equals to `accountsNum`.
 
 When all services run finished, Check that the number of rows in table is as expected. 
